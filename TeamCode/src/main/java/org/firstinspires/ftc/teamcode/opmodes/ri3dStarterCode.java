@@ -77,6 +77,7 @@ public class ri3dStarterCode extends OpMode {
     private Servo     diverter        = null;
     private Servo leftStopper  = null;
     private Servo rightStopper = null;
+    private Servo rgbIndicator = null;
 
     private LimelightVision limelight;
 
@@ -162,6 +163,7 @@ public class ri3dStarterCode extends OpMode {
         diverter        = hardwareMap.get(Servo.class,     "diverter");
         leftStopper  = hardwareMap.get(Servo.class, "left_stopper");
         rightStopper = hardwareMap.get(Servo.class, "right_stopper");
+        rgbIndicator = hardwareMap.get(Servo.class, "rgb_indicator");
 
         limelight = new LimelightVision(hardwareMap);
 
@@ -351,6 +353,9 @@ public class ri3dStarterCode extends OpMode {
         lastGP2RB = gp2rb;
         lastGP2LB = gp2lb;
 
+        // ===== Update RGB Indicator based on left shooter alignment =====
+        updateRGBIndicator();
+
         // ===== Telemetry =====
         final double leftRPM  = leftLauncher.getVelocity()  * 60 / 28;
         final double rightRPM = rightLauncher.getVelocity() * 60 / 28;
@@ -393,6 +398,48 @@ public class ri3dStarterCode extends OpMode {
         // All use the same INTAKE_TARGET_VELOCITY magnitude
         double targetVelocity = power * INTAKE_TARGET_VELOCITY;
         intake1.setVelocity(targetVelocity);
+    }
+
+    // =========================================================
+    // RGB INDICATOR CONTROL
+    // =========================================================
+    // PWM servo mapped to RGB hue: 0.0 = RED, 0.5 = GREEN, 1.0 = RED (cycles back)
+    // Based on alignment error between limelight.tx and left target offset
+    // Perfect alignment (error ~0) → GREEN
+    // Large error → RED
+    // =========================================================
+    private static final double RGB_ALIGNMENT_THRESHOLD = 5.0;  // degrees; beyond this = full red
+    private static final double RGB_GREEN_POSITION = 0.5;       // servo position for pure green
+    private static final double RGB_RED_POSITION = 0.0;         // servo position for pure red
+
+    private void updateRGBIndicator() {
+        if (limelight == null || !limelight.hasTarget()) {
+            // No target: set to red
+            rgbIndicator.setPosition(RGB_RED_POSITION);
+            return;
+        }
+
+        // Get alignment error for left shooter
+        double leftTargetOffset = getTargetOffset(true);
+        double leftTx = limelight.getTx();
+        double alignmentError = Math.abs(leftTx - leftTargetOffset);
+
+        // Map error to servo position: 0 error = green (0.5), large error = red (0.0)
+        double servoPosition;
+
+        if (alignmentError <= ALIGN_DEADBAND) {
+            // Perfect alignment: full green
+            servoPosition = RGB_GREEN_POSITION;
+        } else if (alignmentError >= RGB_ALIGNMENT_THRESHOLD) {
+            // Very far off: full red
+            servoPosition = RGB_RED_POSITION;
+        } else {
+            // Linear interpolation between green and red
+            double errorRatio = alignmentError / RGB_ALIGNMENT_THRESHOLD;
+            servoPosition = RGB_GREEN_POSITION - (errorRatio * (RGB_GREEN_POSITION - RGB_RED_POSITION));
+        }
+
+        rgbIndicator.setPosition(servoPosition);
     }
 
     // =========================================================
