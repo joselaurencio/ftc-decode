@@ -124,9 +124,9 @@ public class ri3dStarterCode extends OpMode {
 
     // =========================================================
     // INTAKE STATE
-    // ON  = both motors running inward (intake1 FORWARD, intake2 REVERSE)
-    // OFF = both motors stopped
-    // REVERSE = both motors running outward (intake1 REVERSE, intake2 FORWARD)
+    // ON  = motor running inward (positive velocity)
+    // OFF = motor stopped
+    // REVERSE = motor running outward (negative velocity)
     // =========================================================
     private enum IntakeState { ON, OFF, REVERSE }
     private IntakeState intakeState = IntakeState.OFF;
@@ -173,9 +173,7 @@ public class ri3dStarterCode extends OpMode {
         leftLauncher.setDirection(DcMotorSimple.Direction.FORWARD);
         rightLauncher.setDirection(DcMotorSimple.Direction.FORWARD);
 
-        // intake1 and intake2 face opposite directions physically,
-        // so setting them both FORWARD here and passing opposite
-        // power values in setIntakePower() makes them roll inward together.
+        // intake1 direction
         intake1.setDirection(DcMotorSimple.Direction.FORWARD);
 
         leftLauncher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
@@ -300,9 +298,9 @@ public class ri3dStarterCode extends OpMode {
         }
 
         // ===== Intake toggle =====
-        // A = toggle intake IN (both motors roll inward)
-        // X = toggle intake REVERSE (both motors roll outward)
-        // Pressing A while reversing (or X while running) switches cleanly.
+        // A = toggle intake IN (forward at INTAKE_TARGET_VELOCITY)
+        // X = toggle intake REVERSE (backward at INTAKE_TARGET_VELOCITY)
+        // Pressing A while reversing (or X while running) switches cleanly to OFF first
         if (gamepad1.aWasPressed()) {
             if (intakeState == IntakeState.ON) {
                 intakeState = IntakeState.OFF;
@@ -360,6 +358,7 @@ public class ri3dStarterCode extends OpMode {
         telemetry.addData("Shooter Mode",        shooterMode);
         telemetry.addData("Launcher Distance",   launcherDistance);
         telemetry.addData("Auto Align Active",   autoAlignActive);
+        telemetry.addData("Intake State",        intakeState);
         telemetry.addData("Left velocity", leftLauncher.getVelocity());
         telemetry.addData("launcherMin", launcherMin);
         telemetry.addData("Left Launch State",   leftLaunchState);
@@ -381,13 +380,21 @@ public class ri3dStarterCode extends OpMode {
         telemetry.addData("Manual L target TPS", manualLeftTarget);
         telemetry.addData("Manual R target TPS", manualRightTarget);
     }
+
+    // =========================================================
+    // INTAKE CONTROL
+    // =========================================================
     private static final double INTAKE_RPM            = 1000.0;
     private static final double INTAKE_TICKS_PER_REV  = 28.0;
     private static final double INTAKE_TARGET_VELOCITY = INTAKE_RPM * INTAKE_TICKS_PER_REV / 60.0;
+
     private void setIntakePower(double power) {
-        // power is -1, 0, or 1 — scale to velocity
-        intake1.setVelocity(6000);
+        // power: 1 = forward, 0 = stop, -1 = reverse
+        // All use the same INTAKE_TARGET_VELOCITY magnitude
+        double targetVelocity = power * INTAKE_TARGET_VELOCITY;
+        intake1.setVelocity(targetVelocity);
     }
+
     // =========================================================
     // MECANUM DRIVE
     // =========================================================

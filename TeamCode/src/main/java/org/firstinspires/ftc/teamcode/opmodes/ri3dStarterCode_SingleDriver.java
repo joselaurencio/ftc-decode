@@ -106,7 +106,7 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
     private LauncherDistance launcherDistance = LauncherDistance.CLOSE;
 
     // ===== Intake constants =====
-    private static final double INTAKE_RPM             = 1500.0;
+    private static final double INTAKE_RPM             = 6000;
     private static final double INTAKE_TICKS_PER_REV   = 28.0;
     private static final double INTAKE_TARGET_VELOCITY  = INTAKE_RPM * INTAKE_TICKS_PER_REV / 60.0;
 
