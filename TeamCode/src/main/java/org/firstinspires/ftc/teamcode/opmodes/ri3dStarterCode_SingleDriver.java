@@ -10,20 +10,24 @@ import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.PIDFCoefficients;
 import com.qualcomm.robotcore.hardware.Servo;
+import com.qualcomm.robotcore.hardware.PwmControl;
 import com.qualcomm.robotcore.util.ElapsedTime;
 import org.firstinspires.ftc.teamcode.vision.LimelightVision;
 import org.firstinspires.ftc.teamcode.math.ShooterModel;
 import org.firstinspires.ftc.teamcode.subsystems.Shooter;
 
-@TeleOp(name = "DECODE Ri3D SINGLE DRIVER", group = "StarterBot")
+@TeleOp(name = "DECODE Single Driver Teleop", group = "StarterBot")
 //@Disabled
 public class ri3dStarterCode_SingleDriver extends OpMode {
 
+    @Override
+    public void stop() {}
+    // =========================================================
+
     // ================= AUTO ALIGN PD =================
-    private double kP_align = 0.12;   // raised from 0.08 — tune up from here
+    private double kP_align = .08;
     private double kD_align = 0.003;
-    private double previousLeftAlignError  = 0;  // separate per shooter
-    private double previousRightAlignError = 0;
+    private double previousAlignError = 0;
 
     private final double ALIGN_DEADBAND  = 0.2;
     private final double MAX_ALIGN_POWER = 0.7;
@@ -32,7 +36,7 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
     // ================= DYNAMIC OFFSET TUNING =================
     private final double BASE_OFFSET     = -3.0;
     private final double DISTANCE_FACTOR =  0.002;
-    private final double SHOOTER_OFFSET  =  0.1;
+    private final double SHOOTER_OFFSET  =  .1;
     // =========================================================
 
     final double FEED_TIME_SECONDS = 1.5;
@@ -57,10 +61,9 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
     final double LEFT_POSITION  = 0.5;
     final double RIGHT_POSITION = 0;
 
-    private boolean lastBack  = false;
-    private boolean lastY = false;
-    private boolean lastGP2RB = false;
-    private boolean lastGP2LB = false;
+    private boolean lastBack   = false;
+    private boolean lastGP2RB  = false;   // edge detect for GP2 right bumper (manual left shot)
+    private boolean lastGP2LB  = false;   // edge detect for GP2 left  bumper (manual right shot)
 
     // ===== Hardware =====
     private DcMotor   leftFrontDrive  = null;
@@ -69,33 +72,64 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
     private DcMotor   rightBackDrive  = null;
     private DcMotorEx leftLauncher    = null;
     private DcMotorEx rightLauncher   = null;
-    private DcMotorEx intake1         = null;
+    private DcMotorEx   intake1          = null;
     private CRServo   leftFeeder      = null;
     private CRServo   rightFeeder     = null;
     private Servo     diverter        = null;
-    private Servo     leftStopper     = null;
-    private Servo     rightStopper    = null;
+    private Servo leftStopper  = null;
+    private Servo rightStopper = null;
+    private Servo rgbIndicator = null;
 
     private LimelightVision limelight;
 
-    ElapsedTime leftFeederTimer  = new ElapsedTime();
-    ElapsedTime rightFeederTimer = new ElapsedTime();
+    ElapsedTime leftFeederTimer        = new ElapsedTime();
+    ElapsedTime rightFeederTimer       = new ElapsedTime();
 
     // ===== State Enums =====
-    private enum LaunchState { IDLE, ALIGN, SPIN_UP, LAUNCH, LAUNCHING }
+
+    private enum LaunchState {
+        IDLE,
+        ALIGN,
+        SPIN_UP,
+        LAUNCH,
+        LAUNCHING,
+    }
     private LaunchState leftLaunchState;
     private LaunchState rightLaunchState;
 
+    // =========================================================
+    // MANUAL (NO-ALIGN) STATE MACHINE
+    // =========================================================
+    // Mirrors LaunchState but skips ALIGN entirely.
+    // Used for GP2 bumper fallback shots — great for lookup table
+    // data collection and shooter verification without vision.
+    //
+    //   GP2 RIGHT BUMPER → manual LEFT  shot (spin up left launcher,  fire left  feeder)
+    //   GP2 LEFT  BUMPER → manual RIGHT shot (spin up right launcher, fire right feeder)
+    //
+    // The velocity target is read from Limelight distance → ShooterModel
+    // at the moment the button is pressed (same formula as VISION mode),
+    // so you get real distance-based data even without alignment.
+    // If Limelight has no target, it falls back to launcherTarget.
+    // =========================================================
     private enum ManualLaunchState { IDLE, SPIN_UP, LAUNCH, LAUNCHING }
     private ManualLaunchState manualLeftState  = ManualLaunchState.IDLE;
     private ManualLaunchState manualRightState = ManualLaunchState.IDLE;
 
+    // Velocity snapshot taken when the manual shot is triggered.
+    // Stored separately so a Limelight dropout mid-shot doesn't change the speed.
     private double manualLeftTarget  = 0;
     private double manualRightTarget = 0;
 
     private enum DiverterDirection { LEFT, RIGHT }
     private DiverterDirection diverterDirection = DiverterDirection.LEFT;
 
+    // =========================================================
+    // INTAKE STATE
+    // ON  = motor running inward (positive velocity)
+    // OFF = motor stopped
+    // REVERSE = motor running outward (negative velocity)
+    // =========================================================
     private enum IntakeState { ON, OFF, REVERSE }
     private IntakeState intakeState = IntakeState.OFF;
 
@@ -105,24 +139,6 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
     private enum LauncherDistance { CLOSE, FAR }
     private LauncherDistance launcherDistance = LauncherDistance.CLOSE;
 
-    // ===== Intake constants =====
-    private static final double INTAKE_RPM             = 6000;
-    private static final double INTAKE_TICKS_PER_REV   = 28.0;
-    private static final double INTAKE_TARGET_VELOCITY  = INTAKE_RPM * INTAKE_TICKS_PER_REV / 60.0;
-
-    // ===== BALL COUNTER =====
-    private int ballCount = 0;
-
-    // How far below target velocity counts as a "ball detected" dip.
-// Tune this — start around 30-40% of target velocity.
-    private static final double BALL_DIP_THRESHOLD  = INTAKE_TARGET_VELOCITY * 0.35;
-
-    // Once dip is detected, ignore further dips for this many ms
-    // (prevents one ball from being counted twice as RPM bounces)
-    private static final long   BALL_DEBOUNCE_MS    = 400;
-
-    private boolean ballDipActive    = false;
-    private long    lastBallDetected = 0;
     double leftFrontPower;
     double rightFrontPower;
     double leftBackPower;
@@ -142,15 +158,13 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
         rightBackDrive  = hardwareMap.get(DcMotor.class,   "right_back_drive");
         leftLauncher    = hardwareMap.get(DcMotorEx.class, "left_launcher");
         rightLauncher   = hardwareMap.get(DcMotorEx.class, "right_launcher");
-        intake1         = hardwareMap.get(DcMotorEx.class, "intake1");
+        intake1         = hardwareMap.get(DcMotorEx.class,   "intake1");
         leftFeeder      = hardwareMap.get(CRServo.class,   "left_feeder");
         rightFeeder     = hardwareMap.get(CRServo.class,   "right_feeder");
         diverter        = hardwareMap.get(Servo.class,     "diverter");
-        leftStopper     = hardwareMap.get(Servo.class,     "left_stopper");
-        rightStopper    = hardwareMap.get(Servo.class,     "right_stopper");
-
-        leftStopper.setPosition(0.7);
-        rightStopper.setPosition(0.7);
+        leftStopper  = hardwareMap.get(Servo.class, "left_stopper");
+        rightStopper = hardwareMap.get(Servo.class, "right_stopper");
+        rgbIndicator = hardwareMap.get(Servo.class, "rgb_indicator");
 
         limelight = new LimelightVision(hardwareMap);
 
@@ -162,11 +176,11 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
         leftLauncher.setDirection(DcMotorSimple.Direction.FORWARD);
         rightLauncher.setDirection(DcMotorSimple.Direction.FORWARD);
 
+        // intake1 direction
         intake1.setDirection(DcMotorSimple.Direction.FORWARD);
 
         leftLauncher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         rightLauncher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        intake1.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
 
         leftFrontDrive.setZeroPowerBehavior(BRAKE);
         rightFrontDrive.setZeroPowerBehavior(BRAKE);
@@ -174,11 +188,12 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
         rightBackDrive.setZeroPowerBehavior(BRAKE);
         leftLauncher.setZeroPowerBehavior(BRAKE);
         rightLauncher.setZeroPowerBehavior(BRAKE);
-        intake1.setZeroPowerBehavior(BRAKE);
 
         leftFeeder.setPower(STOP_SPEED);
         rightFeeder.setPower(STOP_SPEED);
 
+        intake1.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        intake1.setZeroPowerBehavior(BRAKE);
         intake1.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER,
                 new PIDFCoefficients(10, 0, 0, 1));
         leftLauncher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER,
@@ -208,25 +223,31 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
 
         // ===== Vision Mode: continuously update launcher velocity target =====
         if (shooterMode == ShooterMode.VISION && limelight.hasTarget()) {
+
             double distanceCm = limelight.getDistanceFromArea();
 
             double leftRPM  = ShooterModel.distanceToRPM(distanceCm, true);
             double rightRPM = ShooterModel.distanceToRPM(distanceCm, false);
 
+            // Decide based on which shooter is currently being used
             double selectedRPM;
+
             if (leftLaunchState != LaunchState.IDLE) {
                 selectedRPM = leftRPM;
             } else if (rightLaunchState != LaunchState.IDLE) {
                 selectedRPM = rightRPM;
             } else {
+                // default (doesn't really matter when idle)
                 selectedRPM = leftRPM;
             }
 
-            launcherTarget = selectedRPM * 28.0 / 60.0;
-            launcherMin    = launcherTarget * 0.95;
+            double ticksPerSecond = selectedRPM * 28.0 / 60.0;
+
+            launcherTarget = ticksPerSecond;
+            launcherMin    = ticksPerSecond * 0.95;
         }
 
-        // ===== Toggle Vision/Manual mode (BACK) =====
+        // ===== Toggle Vision/Manual mode with BACK button =====
         if (gamepad1.back && !lastBack) {
             shooterMode = (shooterMode == ShooterMode.MANUAL)
                     ? ShooterMode.VISION
@@ -235,32 +256,29 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
         lastBack = gamepad1.back;
 
         // ===== Driver input =====
-        double forward = -gamepad1.left_stick_y;
-        double strafe  =  gamepad1.left_stick_x;
-        double rotate  =  gamepad1.right_stick_x;
+        double forward = -gamepad2.left_stick_y;
+        double strafe  = gamepad2.left_stick_x;
+        double rotate  = gamepad2.right_stick_x;
 
-        // ===== Manual auto-align override (hold right trigger) =====
-        // This is the continuous hold-to-align — separate from the
-        // FSM align that triggers on bumper press.
+        // ===== Manual auto-align override (right trigger) =====
         boolean autoAlignActive = gamepad1.right_trigger > 0.5;
 
         if (autoAlignActive && limelight.hasTarget()) {
             double currentYaw = limelight.getTx();
             double error      = -currentYaw;
-            double derivative = error - previousLeftAlignError; // reuse left for manual align
+            double derivative = error - previousAlignError;
             double output     = (error * kP_align) + (derivative * kD_align);
 
             if (Math.abs(error) < ALIGN_DEADBAND) output = 0;
             output = Math.max(-MAX_ALIGN_POWER, Math.min(MAX_ALIGN_POWER, output));
 
-            rotate                 = output;
-            previousLeftAlignError = error;
-        } else if (!autoAlignActive) {
-            previousLeftAlignError = 0;
+            rotate             = output;
+            previousAlignError = error;
+        } else {
+            previousAlignError = 0;
         }
 
         mecanumDrive(forward, strafe, rotate);
-        updateBallCounter();
 
         // ===== Manual flywheel spin-up (hold Y) =====
         if (gamepad1.y) {
@@ -268,13 +286,7 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
             rightLauncher.setVelocity(launcherTarget);
         }
 
-        // ===== Ball counter reset (Y press) =====
-        if (gamepad1.y && !lastY) {
-            ballCount = 0;
-        }
-        lastY = gamepad1.y;
-
-        // ===== Diverter toggle (D-Pad Down) =====
+        // ===== Diverter toggle =====
         if (gamepad1.dpadDownWasPressed()) {
             switch (diverterDirection) {
                 case LEFT:
@@ -289,8 +301,9 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
         }
 
         // ===== Intake toggle =====
-        // A = toggle intake IN
-        // X = toggle intake REVERSE
+        // A = toggle intake IN (forward at INTAKE_TARGET_VELOCITY)
+        // X = toggle intake REVERSE (backward at INTAKE_TARGET_VELOCITY)
+        // Pressing A while reversing (or X while running) switches cleanly to OFF first
         if (gamepad1.aWasPressed()) {
             if (intakeState == IntakeState.ON) {
                 intakeState = IntakeState.OFF;
@@ -311,7 +324,7 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
             }
         }
 
-        // ===== Distance preset toggle (D-Pad Up) =====
+        // ===== Distance preset toggle =====
         if (gamepad1.dpadUpWasPressed()) {
             switch (launcherDistance) {
                 case CLOSE:
@@ -328,10 +341,12 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
         }
 
         // ===== Vision launch state machines (GP1 bumpers) =====
+        // Right bumper = left shooter, Left bumper = right shooter
         launchLeft(gamepad1.leftBumperWasPressed());
         launchRight(gamepad1.rightBumperWasPressed());
 
         // ===== Manual (no-align) launch state machines (GP2 bumpers) =====
+        // GP2 Right bumper = manual left shot, GP2 Left bumper = manual right shot
         boolean gp2rb = gamepad2.right_bumper;
         boolean gp2lb = gamepad2.left_bumper;
         manualLaunchLeft( gp2rb && !lastGP2RB);
@@ -339,69 +354,110 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
         lastGP2RB = gp2rb;
         lastGP2LB = gp2lb;
 
+        // ===== Update RGB Indicator based on left shooter alignment =====
+        updateRGBIndicator();
+
         // ===== Telemetry =====
         final double leftRPM  = leftLauncher.getVelocity()  * 60 / 28;
         final double rightRPM = rightLauncher.getVelocity() * 60 / 28;
 
-        telemetry.addData("Shooter Mode",       shooterMode);
-        telemetry.addData("Launcher Distance",  launcherDistance);
-        telemetry.addData("Auto Align Active",  autoAlignActive);
-        telemetry.addData("Left velocity",      leftLauncher.getVelocity());
-        telemetry.addData("launcherMin",        launcherMin);
-        telemetry.addData("Left Launch State",  leftLaunchState);
-        telemetry.addData("Right Launch State", rightLaunchState);
-        telemetry.addData("Manual Left State",  manualLeftState);
-        telemetry.addData("Manual Right State", manualRightState);
-        telemetry.addData("Left RPM",           leftRPM);
-        telemetry.addData("Right RPM",          rightRPM);
-        telemetry.addData("Vision Target TPS",  launcherTarget);
-        telemetry.addData("Intake State",       intakeState);
+        telemetry.addData("Shooter Mode",        shooterMode);
+        telemetry.addData("Launcher Distance",   launcherDistance);
+        telemetry.addData("Auto Align Active",   autoAlignActive);
+        telemetry.addData("Intake State",        intakeState);
+        telemetry.addData("Left velocity", leftLauncher.getVelocity());
+        telemetry.addData("launcherMin", launcherMin);
+        telemetry.addData("Left Launch State",   leftLaunchState);
+        telemetry.addData("Right Launch State",  rightLaunchState);
+        telemetry.addData("Manual Left State",   manualLeftState);
+        telemetry.addData("Manual Right State",  manualRightState);
+        telemetry.addData("Left RPM",            leftRPM);
+        telemetry.addData("Right RPM",           rightRPM);
+        telemetry.addData("Vision Target TPS",   launcherTarget);
 
         if (limelight.hasTarget()) {
-            telemetry.addData("Limelight tx",    limelight.getTx());
-            telemetry.addData("Distance (cm)",   limelight.getDistanceFromArea());
-            telemetry.addData("L targetOffset",  getTargetOffset(true));
-            telemetry.addData("R targetOffset",  getTargetOffset(false));
+            telemetry.addData("Limelight tx",      limelight.getTx());
+            telemetry.addData("Distance (cm)",     limelight.getDistanceFromArea());
+            telemetry.addData("L targetOffset",    getTargetOffset(true));
+            telemetry.addData("R targetOffset",    getTargetOffset(false));
         }
-        telemetry.addData("Balls Counted",     ballCount);
-        telemetry.addData("Intake Velocity",   intake1.getVelocity());
-        telemetry.addData("Intake Target",     INTAKE_TARGET_VELOCITY);
-        telemetry.addData("Velocity Drop",     INTAKE_TARGET_VELOCITY - intake1.getVelocity());
 
+        // Manual shot data — always show so you can log it during testing
         telemetry.addData("Manual L target TPS", manualLeftTarget);
         telemetry.addData("Manual R target TPS", manualRightTarget);
+
+        // RGB Indicator Debug
+        telemetry.addData("RGB Servo Position", rgbIndicator.getPosition());
+        if (limelight.hasTarget()) {
+            double leftTargetOffset = getTargetOffset(true);
+            double leftTx = limelight.getTx();
+            double alignmentError = Math.abs(leftTx - leftTargetOffset);
+            telemetry.addData("Alignment Error (deg)", alignmentError);
+        }
     }
 
     // =========================================================
-    // INTAKE HELPER
+    // INTAKE CONTROL
     // =========================================================
+    private static final double INTAKE_RPM            = 1000.0;
+    private static final double INTAKE_TICKS_PER_REV  = 28.0;
+    private static final double INTAKE_TARGET_VELOCITY = INTAKE_RPM * INTAKE_TICKS_PER_REV / 60.0;
+
     private void setIntakePower(double power) {
-        intake1.setVelocity(power * INTAKE_TARGET_VELOCITY);
+        // power: 1 = forward, 0 = stop, -1 = reverse
+        // All use the same INTAKE_TARGET_VELOCITY magnitude
+        double targetVelocity = power * INTAKE_TARGET_VELOCITY;
+        intake1.setVelocity(targetVelocity);
     }
-    private void updateBallCounter() {
-        // Don't count during a shot — feeder noise can fake a dip
-        if (leftLaunchState  == LaunchState.LAUNCHING ||
-                rightLaunchState == LaunchState.LAUNCHING) return;
-        if (intakeState != IntakeState.ON) return;
-        // Only count when intake is actually running inward
 
+    // =========================================================
+    // RGB INDICATOR CONTROL (GoBilda PWM RGB Light)
+    // =========================================================
+    // PWM pulse widths for GoBilda RGB:
+    // RED:     1000 µs → servo position 0.0
+    // ORANGE:  1100 µs → servo position 0.05
+    // YELLOW:  1200 µs → servo position 0.10
+    // GREEN:   1300 µs → servo position 0.15
+    // CYAN:    1400 µs → servo position 0.20
+    // BLUE:    1500 µs → servo position 0.25
+    // MAGENTA: 1600 µs → servo position 0.30
+    // WHITE:   1700 µs → servo position 0.35
+    // OFF:     2000 µs → servo position 1.0
+    //
+    // Linear mapping: pulse_width = 1000 + (position * 1000)
+    // =========================================================
+    private static final double RGB_RED_POSITION = 0.0;      // 1000 µs
+    private static final double RGB_GREEN_POSITION = 0.3;    // 1300 µs
+    private static final double RGB_ALIGNMENT_THRESHOLD = 5.0;  // degrees
 
-        double currentVelocity = intake1.getVelocity();
-        double velocityDrop    = INTAKE_TARGET_VELOCITY - currentVelocity;
-        long   now             = System.currentTimeMillis();
-
-        // Dip detected — velocity dropped significantly below target
-        if (velocityDrop > BALL_DIP_THRESHOLD && !ballDipActive
-                && (now - lastBallDetected) > BALL_DEBOUNCE_MS) {
-            ballDipActive = true;
+    private void updateRGBIndicator() {
+        if (limelight == null || !limelight.hasTarget()) {
+            // No target: turn off (2000 µs = position 1.0)
+            rgbIndicator.setPosition(1.0);
+            return;
         }
 
-        // Recovery — velocity came back up, ball has passed through
-        if (ballDipActive && velocityDrop < BALL_DIP_THRESHOLD * 0.5) {
-            ballCount++;
-            ballDipActive     = false;
-            lastBallDetected  = now;
+        // Get alignment error for left shooter
+        double leftTargetOffset = getTargetOffset(true);
+        double leftTx = limelight.getTx();
+        double alignmentError = Math.abs(leftTx - leftTargetOffset);
+
+        // Map error to servo position: 0 error = green, large error = red
+        double servoPosition;
+
+        if (alignmentError <= ALIGN_DEADBAND) {
+            // Perfect alignment: full green (1300 µs)
+            servoPosition = RGB_GREEN_POSITION;
+        } else if (alignmentError >= RGB_ALIGNMENT_THRESHOLD) {
+            // Very far off: full red (1000 µs)
+            servoPosition = RGB_RED_POSITION;
+        } else {
+            // Linear interpolation between green and red
+            double errorRatio = alignmentError / RGB_ALIGNMENT_THRESHOLD;
+            servoPosition = RGB_GREEN_POSITION - (errorRatio * (RGB_GREEN_POSITION - RGB_RED_POSITION));
         }
+
+        rgbIndicator.setPosition(servoPosition);
     }
 
     // =========================================================
@@ -444,19 +500,24 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
     }
 
     // =========================================================
-    // LEFT LAUNCH STATE MACHINE
-    // IDLE → (ALIGN if trigger held, else) SPIN_UP → LAUNCH → LAUNCHING → IDLE
+    // LEFT LAUNCH STATE MACHINE (vision, with alignment)
+    // State flow: IDLE → ALIGN → SPIN_UP → LAUNCH → LAUNCHING → IDLE
     // =========================================================
+    // ================= LEFT LAUNCH =================
     void launchLeft(boolean shotRequested) {
         switch (leftLaunchState) {
 
             case IDLE:
-                leftStopper.setPosition(0.7);
+                leftStopper.setPosition(0.55);  // close when a new shot is requested
                 if (shotRequested && limelight.hasTarget()) {
-                    previousLeftAlignError = 0;
-                    leftLaunchState = (gamepad1.right_trigger > 0.5)
-                            ? LaunchState.ALIGN
-                            : LaunchState.SPIN_UP;
+                    previousAlignError = 0;
+
+                    // 🔥 ONLY ALIGN if trigger held
+                    if (gamepad1.right_trigger > 0.5) {
+                        leftLaunchState = LaunchState.ALIGN;
+                    } else {
+                        leftLaunchState = LaunchState.SPIN_UP;
+                    }
                 }
                 break;
 
@@ -468,28 +529,20 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
                 }
 
                 double leftTargetOffset = getTargetOffset(true);
-                double leftTx           = limelight.getTx();
-                double leftError        = leftTx - leftTargetOffset;
-                double leftDeriv        = leftError - previousLeftAlignError;
-                // FIX: removed double-negation — power sign now correctly
-                // drives the robot toward the target
-                double leftPower        = leftError * kP_align + leftDeriv * kD_align;
+                double leftTx = limelight.getTx();
+                double leftError = leftTx - leftTargetOffset;
+                double leftDeriv = leftError - previousAlignError;
+                double leftPower = -(leftError * kP_align + leftDeriv * kD_align);
 
                 if (Math.abs(leftError) < ALIGN_DEADBAND) leftPower = 0;
                 leftPower = Math.max(-MAX_ALIGN_POWER, Math.min(MAX_ALIGN_POWER, leftPower));
 
-                mecanumDrive(0, 0, leftPower);
-                previousLeftAlignError = leftError;
-
-                // Alignment telemetry — watch these while tuning kP/kD
-                telemetry.addData("[L ALIGN] tx",     leftTx);
-                telemetry.addData("[L ALIGN] target",  leftTargetOffset);
-                telemetry.addData("[L ALIGN] error",   leftError);
-                telemetry.addData("[L ALIGN] power",   leftPower);
+                mecanumDrive(0, 0, -leftPower);
+                previousAlignError = leftError;
 
                 if (isAligned(true)) {
                     mecanumDrive(0, 0, 0);
-                    previousLeftAlignError = 0;
+                    previousAlignError = 0;
                     leftLaunchState = LaunchState.SPIN_UP;
                 }
                 break;
@@ -505,7 +558,7 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
                 break;
 
             case LAUNCH:
-                leftStopper.setPosition(0.8);
+                leftStopper.setPosition(.6);  // open before feeding
                 leftFeeder.setPower(FULL_SPEED);
                 leftFeederTimer.reset();
                 leftLaunchState = LaunchState.LAUNCHING;
@@ -521,19 +574,24 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
     }
 
     // =========================================================
-    // RIGHT LAUNCH STATE MACHINE
-    // IDLE → (ALIGN if trigger held, else) SPIN_UP → LAUNCH → LAUNCHING → IDLE
+    // RIGHT LAUNCH STATE MACHINE (vision, with alignment)
+    // State flow: IDLE → ALIGN → SPIN_UP → LAUNCH → LAUNCHING → IDLE
     // =========================================================
+    // ================= RIGHT LAUNCH =================
     void launchRight(boolean shotRequested) {
         switch (rightLaunchState) {
 
             case IDLE:
-                rightStopper.setPosition(0.7);
+                rightStopper.setPosition(0.55);  // close when a new shot is requested
                 if (shotRequested && limelight.hasTarget()) {
-                    previousRightAlignError = 0;
-                    rightLaunchState = (gamepad1.right_trigger > 0.5)
-                            ? LaunchState.ALIGN
-                            : LaunchState.SPIN_UP;
+                    previousAlignError = 0;
+
+                    // ONLY ALIGN if trigger held
+                    if (gamepad1.right_trigger > 0.5) {
+                        rightLaunchState = LaunchState.ALIGN;
+                    } else {
+                        rightLaunchState = LaunchState.SPIN_UP;
+                    }
                 }
                 break;
 
@@ -545,26 +603,20 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
                 }
 
                 double rightTargetOffset = getTargetOffset(false);
-                double rightTx           = limelight.getTx();
-                double rightError        = rightTx - rightTargetOffset;
-                double rightDeriv        = rightError - previousRightAlignError;
-                // FIX: removed double-negation
-                double rightPower        = rightError * kP_align + rightDeriv * kD_align;
+                double rightTx = limelight.getTx();
+                double rightError = rightTx - rightTargetOffset;
+                double rightDeriv = rightError - previousAlignError;
+                double rightPower = -(rightError * kP_align + rightDeriv * kD_align);
 
                 if (Math.abs(rightError) < ALIGN_DEADBAND) rightPower = 0;
                 rightPower = Math.max(-MAX_ALIGN_POWER, Math.min(MAX_ALIGN_POWER, rightPower));
 
-                mecanumDrive(0, 0, rightPower);
-                previousRightAlignError = rightError;
-
-                telemetry.addData("[R ALIGN] tx",     rightTx);
-                telemetry.addData("[R ALIGN] target",  rightTargetOffset);
-                telemetry.addData("[R ALIGN] error",   rightError);
-                telemetry.addData("[R ALIGN] power",   rightPower);
+                mecanumDrive(0, 0, -rightPower);
+                previousAlignError = rightError;
 
                 if (isAligned(false)) {
                     mecanumDrive(0, 0, 0);
-                    previousRightAlignError = 0;
+                    previousAlignError = 0;
                     rightLaunchState = LaunchState.SPIN_UP;
                 }
                 break;
@@ -579,7 +631,7 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
                 break;
 
             case LAUNCH:
-                rightStopper.setPosition(0.2);
+                rightStopper.setPosition(0.2);  // open before feeding
                 rightFeeder.setPower(FULL_SPEED);
                 rightFeederTimer.reset();
                 rightLaunchState = LaunchState.LAUNCHING;
@@ -596,17 +648,26 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
 
     // =========================================================
     // MANUAL LEFT LAUNCH STATE MACHINE (no alignment)
+    // =========================================================
     // GP2 RIGHT BUMPER triggers this.
+    // Spins up BOTH launchers to the distance-based velocity,
+    // then fires the LEFT feeder for FEED_TIME_SECONDS.
+    // No robot rotation — driver aims manually.
+    // Use this to build your RPM lookup table:
+    //   stand at a known distance, press GP2 RB, read "Manual L target TPS"
+    //   from telemetry, convert → RPM = TPS * 60 / 28.
     // =========================================================
     void manualLaunchLeft(boolean shotRequested) {
         switch (manualLeftState) {
 
             case IDLE:
                 if (shotRequested) {
+                    // Snapshot velocity at trigger time — uses Limelight distance
+                    // if available, otherwise falls back to current launcherTarget.
                     if (limelight.hasTarget()) {
                         double distanceCm = limelight.getDistanceFromArea();
-                        double rpm        = ShooterModel.distanceToRPM(distanceCm, true);
-                        manualLeftTarget  = rpm * 28.0 / 60.0;
+                        double rpm = ShooterModel.distanceToRPM(distanceCm,true);
+                        manualLeftTarget = rpm * 28.0 / 60.0;
                     } else {
                         manualLeftTarget = launcherTarget;
                     }
@@ -618,6 +679,7 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
                 leftLauncher.setVelocity(manualLeftTarget);
                 rightLauncher.setVelocity(manualLeftTarget);
 
+                // Use the same 95% threshold as the vision path
                 if (leftLauncher.getVelocity() > manualLeftTarget * 0.95) {
                     manualLeftState = ManualLaunchState.LAUNCH;
                 }
@@ -632,6 +694,7 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
             case LAUNCHING:
                 if (leftFeederTimer.seconds() > FEED_TIME_SECONDS) {
                     leftFeeder.setPower(STOP_SPEED);
+                    // Let flywheels coast down naturally
                     leftLauncher.setVelocity(0);
                     rightLauncher.setVelocity(0);
                     manualLeftState = ManualLaunchState.IDLE;
@@ -642,7 +705,10 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
 
     // =========================================================
     // MANUAL RIGHT LAUNCH STATE MACHINE (no alignment)
+    // =========================================================
     // GP2 LEFT BUMPER triggers this.
+    // Spins up BOTH launchers to the distance-based velocity,
+    // then fires the RIGHT feeder for FEED_TIME_SECONDS.
     // =========================================================
     void manualLaunchRight(boolean shotRequested) {
         switch (manualRightState) {
@@ -651,7 +717,7 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
                 if (shotRequested) {
                     if (limelight.hasTarget()) {
                         double distanceCm = limelight.getDistanceFromArea();
-                        double rpm        = ShooterModel.distanceToRPM(distanceCm, false);
+                        double rpm = ShooterModel.distanceToRPM(distanceCm,false);
                         manualRightTarget = rpm * 28.0 / 60.0;
                     } else {
                         manualRightTarget = launcherTarget;
@@ -684,14 +750,5 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
                 }
                 break;
         }
-    }
-
-    @Override
-    public void stop() {
-        leftLauncher.setVelocity(0);
-        rightLauncher.setVelocity(0);
-        leftFeeder.setPower(STOP_SPEED);
-        rightFeeder.setPower(STOP_SPEED);
-        intake1.setVelocity(0);
     }
 }

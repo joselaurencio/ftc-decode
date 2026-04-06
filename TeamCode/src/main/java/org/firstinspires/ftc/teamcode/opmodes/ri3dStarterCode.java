@@ -203,7 +203,11 @@ public class ri3dStarterCode extends OpMode {
         rightFeeder.setDirection(DcMotorSimple.Direction.FORWARD);
         leftFeeder.setDirection(DcMotorSimple.Direction.REVERSE);
 
+        rgbIndicator.setPosition(0.5);
+
         telemetry.addData("Status", "Initialized");
+
+        telemetry.addData("RGB", rgbIndicator.getPosition());
     }
 
     @Override
@@ -391,7 +395,7 @@ public class ri3dStarterCode extends OpMode {
     // =========================================================
     private static final double INTAKE_RPM            = 1000.0;
     private static final double INTAKE_TICKS_PER_REV  = 28.0;
-    private static final double INTAKE_TARGET_VELOCITY = INTAKE_RPM * INTAKE_TICKS_PER_REV / 60.0;
+    private static final double INTAKE_TARGET_VELOCITY = 6000; // INTAKE_RPM * INTAKE_TICKS_PER_REV / 60.0
 
     private void setIntakePower(double power) {
         // power: 1 = forward, 0 = stop, -1 = reverse

@@ -35,14 +35,14 @@ public class ExampleAuto extends OpMode {
     private final Pose scorePose = new Pose(80.5, 85.5, Math.toRadians(44));
     private final Pose scoreFarPose = new Pose(85, 13, Math.toRadians(73));
 
-    private final Pose pickup1Pose = new Pose(101, 60, Math.toRadians(0));
+    private final Pose pickup1Pose = new Pose(98, 60, Math.toRadians(0));
     private final Pose pickup2Pose = new Pose(103.5, 83.4, Math.toRadians(0));
     private final Pose pickup3Pose = new Pose(96, 35, Math.toRadians(0));
 
-    // Forward poses (12 inches forward)
-    private final Pose pickup1Forward = new Pose(103.5 + 19, 60, Math.toRadians(0));
-    private final Pose pickup2Forward = new Pose(103.5 + 18, 83.4, Math.toRadians(0));
-    private final Pose pickup3Forward = new Pose(103.5 + 20, 35, Math.toRadians(0));
+    // Forward poses (20 inches forward)
+    private final Pose pickup1Forward = new Pose(103.5 + 22, 60, Math.toRadians(0));
+    private final Pose pickup2Forward = new Pose(103.5 + 20, 83.4, Math.toRadians(0));
+    private final Pose pickup3Forward = new Pose(103.5 + 22, 35, Math.toRadians(0));
 
     // ========== PATHS ==========
     private Path scorePreload;
