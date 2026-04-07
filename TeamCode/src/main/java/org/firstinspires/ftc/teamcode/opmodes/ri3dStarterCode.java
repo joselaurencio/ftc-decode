@@ -412,7 +412,7 @@ public class ri3dStarterCode extends OpMode {
     // Perfect alignment (error ~0) → GREEN
     // Large error → RED
     // =========================================================
-    private static final double RGB_ALIGNMENT_THRESHOLD = 5.0;  // degrees; beyond this = full red
+    private static final double RGB_ALIGNMENT_THRESHOLD = 10.0;  // degrees; beyond this = full red
     private static final double RGB_GREEN_POSITION = 0.5;       // servo position for pure green
     private static final double RGB_RED_POSITION = 0.28;         // servo position for pure red
 
