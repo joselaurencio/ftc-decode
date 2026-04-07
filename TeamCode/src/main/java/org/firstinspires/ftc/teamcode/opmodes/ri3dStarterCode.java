@@ -196,14 +196,14 @@ public class ri3dStarterCode extends OpMode {
         intake1.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER,
                 new PIDFCoefficients(10, 0, 0, 1));
         leftLauncher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER,
-                new PIDFCoefficients(300, 0, 0, 10));
+                new PIDFCoefficients(50, 0.5, 2, 5.5));
         rightLauncher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER,
-                new PIDFCoefficients(300, 0, 0, 10));
+                new PIDFCoefficients(300, 0, 0, 5.5));
 
         rightFeeder.setDirection(DcMotorSimple.Direction.FORWARD);
         leftFeeder.setDirection(DcMotorSimple.Direction.REVERSE);
 
-        rgbIndicator.setPosition(0.5);
+        rgbIndicator.setPosition(0.28);
 
         telemetry.addData("Status", "Initialized");
 
