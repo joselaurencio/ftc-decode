@@ -24,8 +24,8 @@ public class ri3dStarterCode extends OpMode {
     // =========================================================
 
     // ================= AUTO ALIGN PD =================
-    private double kP_align = .08;
-    private double kD_align = 0.003;
+    private double kP_align = .02;
+    private double kD_align = 0.001;
     private double previousAlignError = 0;
 
     private final double ALIGN_DEADBAND  = 0.2;
@@ -414,7 +414,7 @@ public class ri3dStarterCode extends OpMode {
     // =========================================================
     private static final double RGB_ALIGNMENT_THRESHOLD = 5.0;  // degrees; beyond this = full red
     private static final double RGB_GREEN_POSITION = 0.5;       // servo position for pure green
-    private static final double RGB_RED_POSITION = 0.0;         // servo position for pure red
+    private static final double RGB_RED_POSITION = 0.28;         // servo position for pure red
 
     private void updateRGBIndicator() {
         if (limelight == null || !limelight.hasTarget()) {

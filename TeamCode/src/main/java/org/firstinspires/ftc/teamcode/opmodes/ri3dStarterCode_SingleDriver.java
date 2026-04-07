@@ -10,13 +10,12 @@ import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.PIDFCoefficients;
 import com.qualcomm.robotcore.hardware.Servo;
-import com.qualcomm.robotcore.hardware.PwmControl;
 import com.qualcomm.robotcore.util.ElapsedTime;
 import org.firstinspires.ftc.teamcode.vision.LimelightVision;
 import org.firstinspires.ftc.teamcode.math.ShooterModel;
 import org.firstinspires.ftc.teamcode.subsystems.Shooter;
 
-@TeleOp(name = "DECODE Single Driver Teleop", group = "StarterBot")
+@TeleOp(name = "DECODE Ri3D Single Driver", group = "StarterBot")
 //@Disabled
 public class ri3dStarterCode_SingleDriver extends OpMode {
 
@@ -25,8 +24,8 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
     // =========================================================
 
     // ================= AUTO ALIGN PD =================
-    private double kP_align = .08;
-    private double kD_align = 0.003;
+    private double kP_align = .02;
+    private double kD_align = 0.001;
     private double previousAlignError = 0;
 
     private final double ALIGN_DEADBAND  = 0.2;
@@ -204,7 +203,11 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
         rightFeeder.setDirection(DcMotorSimple.Direction.FORWARD);
         leftFeeder.setDirection(DcMotorSimple.Direction.REVERSE);
 
+        rgbIndicator.setPosition(0.5);
+
         telemetry.addData("Status", "Initialized");
+
+        telemetry.addData("RGB", rgbIndicator.getPosition());
     }
 
     @Override
@@ -256,9 +259,9 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
         lastBack = gamepad1.back;
 
         // ===== Driver input =====
-        double forward = -gamepad2.left_stick_y;
-        double strafe  = gamepad2.left_stick_x;
-        double rotate  = gamepad2.right_stick_x;
+        double forward = -gamepad1.left_stick_y;
+        double strafe  = gamepad1.left_stick_x;
+        double rotate  = gamepad1.right_stick_x;
 
         // ===== Manual auto-align override (right trigger) =====
         boolean autoAlignActive = gamepad1.right_trigger > 0.5;
@@ -385,15 +388,6 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
         // Manual shot data — always show so you can log it during testing
         telemetry.addData("Manual L target TPS", manualLeftTarget);
         telemetry.addData("Manual R target TPS", manualRightTarget);
-
-        // RGB Indicator Debug
-        telemetry.addData("RGB Servo Position", rgbIndicator.getPosition());
-        if (limelight.hasTarget()) {
-            double leftTargetOffset = getTargetOffset(true);
-            double leftTx = limelight.getTx();
-            double alignmentError = Math.abs(leftTx - leftTargetOffset);
-            telemetry.addData("Alignment Error (deg)", alignmentError);
-        }
     }
 
     // =========================================================
@@ -401,7 +395,7 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
     // =========================================================
     private static final double INTAKE_RPM            = 1000.0;
     private static final double INTAKE_TICKS_PER_REV  = 28.0;
-    private static final double INTAKE_TARGET_VELOCITY = INTAKE_RPM * INTAKE_TICKS_PER_REV / 60.0;
+    private static final double INTAKE_TARGET_VELOCITY = 6000; // INTAKE_RPM * INTAKE_TICKS_PER_REV / 60.0
 
     private void setIntakePower(double power) {
         // power: 1 = forward, 0 = stop, -1 = reverse
@@ -411,29 +405,21 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
     }
 
     // =========================================================
-    // RGB INDICATOR CONTROL (GoBilda PWM RGB Light)
+    // RGB INDICATOR CONTROL
     // =========================================================
-    // PWM pulse widths for GoBilda RGB:
-    // RED:     1000 µs → servo position 0.0
-    // ORANGE:  1100 µs → servo position 0.05
-    // YELLOW:  1200 µs → servo position 0.10
-    // GREEN:   1300 µs → servo position 0.15
-    // CYAN:    1400 µs → servo position 0.20
-    // BLUE:    1500 µs → servo position 0.25
-    // MAGENTA: 1600 µs → servo position 0.30
-    // WHITE:   1700 µs → servo position 0.35
-    // OFF:     2000 µs → servo position 1.0
-    //
-    // Linear mapping: pulse_width = 1000 + (position * 1000)
+    // PWM servo mapped to RGB hue: 0.0 = RED, 0.5 = GREEN, 1.0 = RED (cycles back)
+    // Based on alignment error between limelight.tx and left target offset
+    // Perfect alignment (error ~0) → GREEN
+    // Large error → RED
     // =========================================================
-    private static final double RGB_RED_POSITION = 0.0;      // 1000 µs
-    private static final double RGB_GREEN_POSITION = 0.3;    // 1300 µs
-    private static final double RGB_ALIGNMENT_THRESHOLD = 5.0;  // degrees
+    private static final double RGB_ALIGNMENT_THRESHOLD = 5.0;  // degrees; beyond this = full red
+    private static final double RGB_GREEN_POSITION = 0.5;       // servo position for pure green
+    private static final double RGB_RED_POSITION = 0.28;         // servo position for pure red
 
     private void updateRGBIndicator() {
         if (limelight == null || !limelight.hasTarget()) {
-            // No target: turn off (2000 µs = position 1.0)
-            rgbIndicator.setPosition(1.0);
+            // No target: set to red
+            rgbIndicator.setPosition(RGB_RED_POSITION);
             return;
         }
 
@@ -442,14 +428,14 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
         double leftTx = limelight.getTx();
         double alignmentError = Math.abs(leftTx - leftTargetOffset);
 
-        // Map error to servo position: 0 error = green, large error = red
+        // Map error to servo position: 0 error = green (0.5), large error = red (0.0)
         double servoPosition;
 
         if (alignmentError <= ALIGN_DEADBAND) {
-            // Perfect alignment: full green (1300 µs)
+            // Perfect alignment: full green
             servoPosition = RGB_GREEN_POSITION;
         } else if (alignmentError >= RGB_ALIGNMENT_THRESHOLD) {
-            // Very far off: full red (1000 µs)
+            // Very far off: full red
             servoPosition = RGB_RED_POSITION;
         } else {
             // Linear interpolation between green and red
