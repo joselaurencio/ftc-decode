@@ -32,7 +32,7 @@ public class PedroRedCloseAuto extends OpMode {
     private int pathState;
 
     // ========== POSES ==========
-    private final Pose startPose = new Pose(121.55, 123.44, Math.toRadians(36));
+    private final Pose startPose = new Pose(128.5, 108.5, Math.toRadians(90));
 
     // ========== PATHS ==========
     private Path scorePreload;

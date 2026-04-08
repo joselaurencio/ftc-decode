@@ -15,7 +15,7 @@ import org.firstinspires.ftc.teamcode.vision.LimelightVision;
 import org.firstinspires.ftc.teamcode.math.ShooterModel;
 import org.firstinspires.ftc.teamcode.subsystems.Shooter;
 
-@TeleOp(name = "DECODE Ri3D", group = "StarterBot")
+@TeleOp(name = "DECODE Ri3D Single Driver", group = "StarterBot")
 //@Disabled
 public class ri3dStarterCode_SingleDriver extends OpMode {
 
