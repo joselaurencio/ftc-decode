@@ -48,7 +48,7 @@ public class FlywheelOnlyLauncher extends OpMode {
 
         // Motor Configuration
         topFlywheel.setDirection(DcMotorEx.Direction.FORWARD);
-        bottomFlywheel.setDirection(DcMotorEx.Direction.REVERSE);
+        bottomFlywheel.setDirection(DcMotorEx.Direction.FORWARD);
 
         topFlywheel.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         bottomFlywheel.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
@@ -65,6 +65,12 @@ public class FlywheelOnlyLauncher extends OpMode {
 
     private void handleInputs() {
         double currentStep = gamepad1.a ? STEP_PRECISION : STEP_NORMAL;
+
+        // EMERGENCY STOP: Set both targets to 0
+        if (gamepad1.b) {
+            targetBottomRPM = 0;
+            targetTopRPM = 0;
+        }
 
         // Switch selection between top and bottom flywheel
         if (gamepad1.dpad_up && !lastDpadUp) {
@@ -86,6 +92,13 @@ public class FlywheelOnlyLauncher extends OpMode {
     }
 
     private void adjustRPM(double step) {
+        // If restarting from a stop (0 RPM), jump to minimum operational levels
+        if (targetBottomRPM == 0 && step > 0) {
+            targetBottomRPM = RPM_OFFSET;
+            targetTopRPM = 0;
+            return;
+        }
+
         if (currentSelection == SelectedFlywheel.BOTTOM) {
             targetBottomRPM += step;
             targetBottomRPM = Math.max(RPM_OFFSET, Math.min(MAX_RPM, targetBottomRPM));
@@ -117,15 +130,20 @@ public class FlywheelOnlyLauncher extends OpMode {
         double bottomError = targetBottomRPM - actualBottomRPM;
         double topError = targetTopRPM - actualTopRPM;
 
-        boolean bottomReady = Math.abs(bottomError) < RPM_TOLERANCE;
-        boolean topReady = Math.abs(topError) < RPM_TOLERANCE;
+        boolean bottomReady = targetBottomRPM > 0 && Math.abs(bottomError) < RPM_TOLERANCE;
+        boolean topReady = targetTopRPM > 0 && Math.abs(topError) < RPM_TOLERANCE;
 
         telemetry.addLine("=== FLYWHEEL PERFORMANCE ===");
-        telemetry.addData("STATUS", (bottomReady && topReady) ? "READY" : "SPINNING UP...");
+        if (targetBottomRPM == 0 && targetTopRPM == 0) {
+            telemetry.addData("STATUS", "STOPPED");
+        } else {
+            telemetry.addData("STATUS", (bottomReady && topReady) ? "READY" : "SPINNING UP...");
+        }
         telemetry.addData("Bottom (Target|Actual)", "%.0f | %.0f RPM", targetBottomRPM, actualBottomRPM);
         telemetry.addData("Top    (Target|Actual)", "%.0f | %.0f RPM", targetTopRPM, actualTopRPM);
         
         telemetry.addLine("\n=== CONTROL INTERFACE ===");
+        telemetry.addData("Stop Motors", "(B)");
         telemetry.addData("Selected Flywheel", currentSelection);
         telemetry.addData("Precision Mode (A)", gamepad1.a ? "ACTIVE (10 RPM)" : "INACTIVE (100 RPM)");
         
