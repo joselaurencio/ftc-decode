@@ -229,7 +229,7 @@ public class ri3dStarterCode_SingleDriver extends OpMode {
 
             double distanceCm = limelight.getDistanceFromArea();
 
-            double leftRPM  = ShooterModel.distanceToRPM(distanceCm, true);
+            double leftRPM  = 6000;
             double rightRPM = ShooterModel.distanceToRPM(distanceCm, false);
 
             // Decide based on which shooter is currently being used

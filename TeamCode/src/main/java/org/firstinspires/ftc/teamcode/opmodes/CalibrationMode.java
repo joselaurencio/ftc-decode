@@ -47,7 +47,7 @@ public class CalibrationMode extends OpMode {
     private static final double DIVERTER_LEFT  = .4;
     private static final double DIVERTER_RIGHT = 0.0;
 
-    private double currentRPM             = 3000;
+    private double currentRPM             = 4000;
     private double launcherTargetVelocity = currentRPM * 28.0 / 60.0;
 
     // ===== INTAKE RPM =====
