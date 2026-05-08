@@ -30,8 +30,8 @@ public class FlywheelOnlyLauncher extends OpMode {
     private static final double RPM_TOLERANCE = 100.0;
 
     // --- STATE VARIABLES ---
-    private double targetBottomRPM = 6000.0;
-    private double targetTopRPM = 3000.0;
+    private double targetBottomRPM = 4000.0;
+    private double targetTopRPM = 2000.0;
 
     private enum SelectedFlywheel { BOTTOM, TOP }
     private SelectedFlywheel currentSelection = SelectedFlywheel.BOTTOM;
@@ -48,12 +48,16 @@ public class FlywheelOnlyLauncher extends OpMode {
 
         // Motor Configuration
         topFlywheel.setDirection(DcMotorEx.Direction.FORWARD);
-        bottomFlywheel.setDirection(DcMotorEx.Direction.FORWARD);
+        bottomFlywheel.setDirection(DcMotorEx.Direction.REVERSE);
 
         topFlywheel.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         bottomFlywheel.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
 
-        telemetry.addData("Status", "Hardware Initialized - Flywheels Only");
+        // Set BRAKE behavior to stop motors instantly when power is set to 0
+        topFlywheel.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        bottomFlywheel.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+
+        telemetry.addData("Status", "Hardware Initialized - Flywheels Only (Brake Mode)");
     }
 
     @Override
@@ -111,8 +115,18 @@ public class FlywheelOnlyLauncher extends OpMode {
     }
 
     private void updateMotorVelocity() {
-        topFlywheel.setVelocity(rpmToTicksPerSecond(targetTopRPM));
-        bottomFlywheel.setVelocity(rpmToTicksPerSecond(targetBottomRPM));
+        // Use setPower(0) to trigger BRAKE behavior when target is 0 for instant stop
+        if (targetTopRPM <= 0) {
+            topFlywheel.setPower(0);
+        } else {
+            topFlywheel.setVelocity(rpmToTicksPerSecond(targetTopRPM));
+        }
+
+        if (targetBottomRPM <= 0) {
+            bottomFlywheel.setPower(0);
+        } else {
+            bottomFlywheel.setVelocity(rpmToTicksPerSecond(targetBottomRPM));
+        }
     }
 
     private double rpmToTicksPerSecond(double rpm) {
