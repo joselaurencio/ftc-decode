@@ -41,7 +41,7 @@ public class TournamentOptimized extends OpMode {
     private static final double FULL_SPEED = 1.0;
     private static final double STOP_SPEED = 0.0;
 
-    private static final double RPM_DEVIATION_RANGE = 300.0; // ±300 RPM
+    private static final double RPM_DEVIATION_RANGE = 1000.0; // ±1000 RPM
     private static final double TUNING_STEP = 0.05; // 5% per press
 
     // RGB Constants
@@ -269,8 +269,12 @@ public class TournamentOptimized extends OpMode {
         telemetry.addLine("=== TOURNAMENT OPTIMIZED STATUS ===");
         telemetry.addData("Active Shooter", activeShooter);
         telemetry.addData("Limelight Target", limelight.hasTarget() ? "LOCKED" : "SEARCHING...");
+        if (limelight.hasTarget()) {
+            telemetry.addData("Distance (cm)", "%.1f", limelight.getDistanceFromArea());
+            telemetry.addData("Horizontal Error (tx)", "%.1f", limelight.getTx());
+        }
         
-        telemetry.addLine("\n=== RPM TUNING (±300 RPM) ===");
+        telemetry.addLine("\n=== RPM TUNING (±1000 RPM) ===");
         String bar = "[";
         int barPos = (int)(tuningPercent * 20);
         for (int i = 0; i < 20; i++) {
