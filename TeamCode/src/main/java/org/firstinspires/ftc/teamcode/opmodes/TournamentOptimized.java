@@ -94,7 +94,7 @@ public class TournamentOptimized extends OpMode {
         leftBackDrive.setDirection(DcMotor.Direction.FORWARD);
         rightBackDrive.setDirection(DcMotor.Direction.FORWARD);
 
-        leftLauncher.setDirection(DcMotorSimple.Direction.FORWARD);
+        leftLauncher.setDirection(DcMotorSimple.Direction.REVERSE);
         rightLauncher.setDirection(DcMotorSimple.Direction.FORWARD);
         intake.setDirection(DcMotorSimple.Direction.FORWARD);
 
@@ -206,15 +206,13 @@ public class TournamentOptimized extends OpMode {
                 break;
 
             case SPIN_UP:
-                if (activeShooter == SelectedShooter.LEFT) {
-                    leftLauncher.setVelocity(velocityTicks);
-                } else {
-                    rightLauncher.setVelocity(velocityTicks);
-                }
+                // Always spin both launchers for every shot
+                leftLauncher.setVelocity(velocityTicks);
+                rightLauncher.setVelocity(velocityTicks);
 
-                // Check if up to speed (95% threshold)
-                double currentVel = (activeShooter == SelectedShooter.LEFT) ? leftLauncher.getVelocity() : rightLauncher.getVelocity();
-                if (currentVel > velocityTicks * 0.95) {
+                // Check if both are up to speed (95% threshold)
+                if (leftLauncher.getVelocity() > velocityTicks * 0.95 && 
+                    rightLauncher.getVelocity() > velocityTicks * 0.95) {
                     launchState = LaunchState.LAUNCH;
                 }
                 
@@ -284,8 +282,10 @@ public class TournamentOptimized extends OpMode {
         telemetry.addData("Final Target", "%.0f RPM", targetRPM);
 
         telemetry.addLine("\n=== MOTOR PERFORMANCE ===");
-        double currentRPM = (activeShooter == SelectedShooter.LEFT) ? (leftLauncher.getVelocity() * 60 / 28) : (rightLauncher.getVelocity() * 60 / 28);
-        telemetry.addData("Actual RPM", "%.0f", currentRPM);
+        double leftRPM = Math.abs(leftLauncher.getVelocity() * 60 / 28);
+        double rightRPM = Math.abs(rightLauncher.getVelocity() * 60 / 28);
+        telemetry.addData("Left RPM", "%.0f", leftRPM);
+        telemetry.addData("Right RPM", "%.0f", rightRPM);
         telemetry.addData("Intake", intakeOn ? "ON" : "OFF");
 
         telemetry.update();
