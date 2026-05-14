@@ -144,8 +144,11 @@ public class TournamentOptimized extends OpMode {
     private void handleLimelightRPM() {
         if (limelight.hasTarget()) {
             double distanceCm = limelight.getDistanceFromArea();
-            // Calculate base RPM based on distance
-            baseLimelightRPM = ShooterModel.distanceToRPM(distanceCm, activeShooter == SelectedShooter.LEFT);
+            // Calculate base RPM based on distance model (using true for left/main model)
+            baseLimelightRPM = ShooterModel.distanceToRPM(distanceCm, true);
+        } else {
+            // Default idle RPM if no target found
+            baseLimelightRPM = 3000.0;
         }
         
         // Final target includes the manual deviation (±300 RPM)
