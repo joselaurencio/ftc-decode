@@ -94,7 +94,7 @@ public class TournamentOptimized extends OpMode {
         leftBackDrive.setDirection(DcMotor.Direction.FORWARD);
         rightBackDrive.setDirection(DcMotor.Direction.FORWARD);
 
-        leftLauncher.setDirection(DcMotorSimple.Direction.REVERSE);
+        leftLauncher.setDirection(DcMotorSimple.Direction.FORWARD);
         rightLauncher.setDirection(DcMotorSimple.Direction.FORWARD);
         intake.setDirection(DcMotorSimple.Direction.FORWARD);
 
