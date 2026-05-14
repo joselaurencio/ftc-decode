@@ -7,8 +7,7 @@ import com.qualcomm.robotcore.hardware.DcMotorEx;
 
 /**
  * Simplified TeleOp that only controls the two flywheel motors.
- * Configuration (RPM) happens during INIT LOOP.
- * Both flywheels run at the same speed.
+ * Uses a software sync loop to ensure both motors reach the exact same RPM.
  */
 @TeleOp(name = "Flywheel Only Launcher", group = "Production")
 public class FlywheelOnlyLauncher extends OpMode {
@@ -27,11 +26,15 @@ public class FlywheelOnlyLauncher extends OpMode {
     private static final double STEP_NORMAL = 100.0;
     private static final double STEP_PRECISION = 10.0;
 
-    private static final double RPM_TOLERANCE = 100.0;
+    private static final double RPM_TOLERANCE = 50.0;
+    
+    // Tuning constant for software synchronization
+    private static final double SYNC_GAIN = 0.00005; 
 
     // --- STATE VARIABLES ---
     private double targetRPM = 3000.0;
     private boolean motorsStopped = false;
+    private double topManualPower = 0.0;
 
     private boolean lastDpadRight = false;
     private boolean lastDpadLeft = false;
@@ -42,16 +45,17 @@ public class FlywheelOnlyLauncher extends OpMode {
         topFlywheel = hardwareMap.get(DcMotorEx.class, "topFlywheel");
         bottomFlywheel = hardwareMap.get(DcMotorEx.class, "bottomFlywheel");
 
-        // Reset Encoders to ensure clean start for PID
+        // Reset Encoders
         topFlywheel.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         bottomFlywheel.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         
-        // Re-enable encoder mode
-        topFlywheel.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        // MODE CONFIGURATION:
+        // Top uses RUN_WITHOUT_ENCODER to avoid hardware runaway, sync handled in software loop
+        topFlywheel.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+        // Bottom uses hardware velocity control for precision
         bottomFlywheel.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
 
-        // Motor Configuration: 
-        // We're setting Top to REVERSE and Bottom to FORWARD based on runaway feedback.
+        // Opposite Directions for shooter setup
         topFlywheel.setDirection(DcMotorEx.Direction.REVERSE);
         bottomFlywheel.setDirection(DcMotorEx.Direction.FORWARD);
 
@@ -59,7 +63,7 @@ public class FlywheelOnlyLauncher extends OpMode {
         topFlywheel.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         bottomFlywheel.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
 
-        telemetry.addData("Status", "Hardware Initialized - Encoders Reset");
+        telemetry.addData("Status", "Hardware Initialized - Exact Sync Enabled");
         telemetry.update();
     }
 
@@ -71,13 +75,14 @@ public class FlywheelOnlyLauncher extends OpMode {
         telemetry.addData("Target RPM", "%.0f", targetRPM);
         telemetry.addLine("\nUse DPAD LEFT/RIGHT to adjust");
         telemetry.addData("Precision Mode (A)", gamepad1.a ? "ACTIVE (10 RPM)" : "INACTIVE (100 RPM)");
-        telemetry.addLine("\nPress PLAY to start motors at this speed");
+        telemetry.addLine("\nPress PLAY to start motors");
         telemetry.update();
     }
 
     @Override
     public void start() {
         motorsStopped = false;
+        topManualPower = targetRPM / MAX_RPM; // Initial guess
     }
 
     @Override
@@ -107,17 +112,18 @@ public class FlywheelOnlyLauncher extends OpMode {
     }
 
     private void handleRuntimeInputs() {
-        // Allow adjustments even during runtime
         handleRPMAdjustments();
 
-        // EMERGENCY STOP: Stop motors instantly
+        // EMERGENCY STOP
         if (gamepad1.b) {
             motorsStopped = true;
+            topManualPower = 0;
         }
         
-        // Restart motors if they were stopped
+        // RESUME
         if (gamepad1.x) {
             motorsStopped = false;
+            topManualPower = targetRPM / MAX_RPM;
         }
     }
 
@@ -126,9 +132,20 @@ public class FlywheelOnlyLauncher extends OpMode {
             topFlywheel.setPower(0);
             bottomFlywheel.setPower(0);
         } else {
+            // BOTTOM MOTOR: Velocity Control
             double velocityTicks = (targetRPM * TICKS_PER_REV) / SECONDS_PER_MINUTE;
-            topFlywheel.setVelocity(velocityTicks);
             bottomFlywheel.setVelocity(velocityTicks);
+            
+            // TOP MOTOR: Software Synchronization Loop
+            double actualTopRPM = Math.abs(ticksPerSecondToRPM(topFlywheel.getVelocity()));
+            double error = targetRPM - actualTopRPM;
+            
+            // Adjust power slightly each loop until RPM matches target
+            topManualPower += error * SYNC_GAIN;
+            
+            // Safety Clamp
+            topManualPower = Math.max(0, Math.min(1.0, topManualPower));
+            topFlywheel.setPower(topManualPower);
         }
     }
 
@@ -137,31 +154,24 @@ public class FlywheelOnlyLauncher extends OpMode {
     }
 
     private void updateTelemetry() {
-        // Using absolute values for display
         double actualBottomRPM = Math.abs(ticksPerSecondToRPM(bottomFlywheel.getVelocity()));
         double actualTopRPM = Math.abs(ticksPerSecondToRPM(topFlywheel.getVelocity()));
 
-        double bottomError = targetRPM - actualBottomRPM;
-        double topError = targetRPM - actualTopRPM;
+        double syncError = Math.abs(actualBottomRPM - actualTopRPM);
 
-        boolean ready = !motorsStopped && 
-                        Math.abs(bottomError) < RPM_TOLERANCE && 
-                        Math.abs(topError) < RPM_TOLERANCE;
-
-        telemetry.addLine("=== FLYWHEEL PERFORMANCE ===");
+        telemetry.addLine("=== SYNC PERFORMANCE ===");
         if (motorsStopped) {
-            telemetry.addData("STATUS", "STOPPED (Press X to Resume)");
+            telemetry.addData("STATUS", "STOPPED (X to Resume)");
         } else {
-            telemetry.addData("STATUS", ready ? "READY" : "SPINNING UP...");
+            telemetry.addData("STATUS", syncError < RPM_TOLERANCE ? "LOCKED" : "SYNCING...");
         }
         telemetry.addData("Target RPM", "%.0f", targetRPM);
-        telemetry.addData("Bottom Actual", "%.0f RPM (Vel: %.1f)", actualBottomRPM, bottomFlywheel.getVelocity());
-        telemetry.addData("Top Actual", "%.0f RPM (Vel: %.1f)", actualTopRPM, topFlywheel.getVelocity());
+        telemetry.addData("Bottom RPM", "%.0f", actualBottomRPM);
+        telemetry.addData("Top RPM   ", "%.0f", actualTopRPM);
+        telemetry.addData("Sync Error", "%.0f RPM", syncError);
         
-        telemetry.addLine("\n=== CONTROLS ===");
-        telemetry.addData("Adjust RPM", "DPAD L/R");
-        telemetry.addData("Stop Motors", "B");
-        telemetry.addData("Resume Motors", "X");
+        telemetry.addLine("\n=== DEBUG ===");
+        telemetry.addData("Top Power", "%.4f", topManualPower);
         
         telemetry.update();
     }
