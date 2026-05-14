@@ -129,7 +129,7 @@ public class TournamentOptimized extends OpMode {
 
     @Override
     public void loop() {
-    limelight.update();
+        limelight.update();
 
         handleDrivetrain();
         handleLimelightRPM();
@@ -164,7 +164,7 @@ public class TournamentOptimized extends OpMode {
                 // 3D Tracking: Use Z-distance from the first detected AprilTag
                 // Robot space Z is distance forward from camera
                 // Note: Units depend on your LL calibration, assuming CM
-                currentDistance = Math.abs(fiducials.get(0).getTargetPoseRobotSpace().getPosition().getZ());
+                currentDistance = Math.abs(fiducials.get(0).getTargetPoseRobotSpace().getPosition().z);
                 lastTargetId = fiducials.get(0).getFiducialId();
                 distanceMethod = "3D Pose";
                 
@@ -301,61 +301,33 @@ public class TournamentOptimized extends OpMode {
             return;
         }
 
-        // Calculate alignment error based on active shooter
-        // (Assuming 0 is the center target for now)
-        double alignmentError = Math.abs(limelight.getTx());
-
-        double servoPosition;
-        if (alignmentError <= ALIGN_DEADBAND) {
-            servoPosition = RGB_GREEN_POSITION;
-        } else if (alignmentError >= RGB_ALIGNMENT_THRESHOLD) {
-            servoPosition = RGB_RED_POSITION;
+        double horizontalAngle = limelight.getTx();
+        if (Math.abs(horizontalAngle) < ALIGN_DEADBAND) {
+            rgbIndicator.setPosition(RGB_GREEN_POSITION);
         } else {
-            double errorRatio = alignmentError / RGB_ALIGNMENT_THRESHOLD;
-            servoPosition = RGB_GREEN_POSITION - (errorRatio * (RGB_GREEN_POSITION - RGB_RED_POSITION));
+            rgbIndicator.setPosition(RGB_RED_POSITION);
         }
-        rgbIndicator.setPosition(servoPosition);
     }
 
     private void updateTelemetry() {
-        telemetry.addLine("=== TOURNAMENT OPTIMIZED STATUS ===");
+        telemetry.addData("--- MODE ---", "TOURNAMENT OPTIMIZED");
         telemetry.addData("Active Shooter", activeShooter);
+        telemetry.addData("Launch State", launchState);
         
-        telemetry.addLine("\n=== LIMELIGHT DIAGNOSTICS ===");
-        telemetry.addData("Pipeline", currentPipeline);
-        telemetry.addData("Status", limelight.hasTarget() ? "LOCKED" : "SEARCHING...");
+        telemetry.addData("--- TARGETING ---", "");
         telemetry.addData("Method", distanceMethod);
-        if (lastTargetId != -1) telemetry.addData("Target ID", lastTargetId);
+        telemetry.addData("Distance", "%.1f cm", lastKnownDistance);
+        telemetry.addData("Target ID", lastTargetId);
+        telemetry.addData("Pipeline", currentPipeline);
         
-        if (limelight.hasTarget()) {
-            telemetry.addData("Area (ta)", "%.2f", limelight.getTa());
-            telemetry.addData("Angle (tx)", "%.1f", limelight.getTx());
-            telemetry.addData("Current Dist", "%.1f cm", lastKnownDistance);
-        } else if (targetLossTimer.seconds() < 1.5) {
-            telemetry.addData("Status", "LOST - HOLDING DISTANCE");
-            telemetry.addData("Hold Time", "%.1f s", 1.5 - targetLossTimer.seconds());
-        }
+        telemetry.addData("--- SPEED ---", "");
+        telemetry.addData("Base RPM", "%.0f", baseLimelightRPM);
+        telemetry.addData("Manual Tuning", "%.0f%%", tuningPercent * 100);
+        telemetry.addData("FINAL TARGET", "%.0f RPM", targetRPM);
         
-        telemetry.addLine("\n=== RPM TUNING (±1800 RPM) ===");
-        String bar = "[";
-        int barPos = (int)(tuningPercent * 20);
-        for (int i = 0; i < 20; i++) {
-            if (i == barPos) bar += "█";
-            else if (i == 10) bar += "|";
-            else bar += "-";
-        }
-        bar += "]";
-        telemetry.addLine(bar);
-        telemetry.addData("Manual Adjustment", "%.0f%%", tuningPercent * 100);
-        telemetry.addData("Limelight Base", "%.0f RPM", baseLimelightRPM);
-        telemetry.addData("Final Target", "%.0f RPM", targetRPM);
-
-        telemetry.addLine("\n=== MOTOR PERFORMANCE ===");
-        double leftRPM = Math.abs(leftLauncher.getVelocity() * 60 / 28);
-        double rightRPM = Math.abs(rightLauncher.getVelocity() * 60 / 28);
-        telemetry.addData("Left RPM", "%.0f", leftRPM);
-        telemetry.addData("Right RPM", "%.0f", rightRPM);
-        telemetry.addData("Intake", intakeOn ? "ON" : "OFF");
+        telemetry.addData("--- LIVE RPM ---", "");
+        telemetry.addData("Left Launcher", "%.0f", (leftLauncher.getVelocity() * SECONDS_PER_MINUTE) / TICKS_PER_REV);
+        telemetry.addData("Right Launcher", "%.0f", (rightLauncher.getVelocity() * SECONDS_PER_MINUTE) / TICKS_PER_REV);
 
         telemetry.update();
     }
