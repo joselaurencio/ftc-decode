@@ -14,6 +14,9 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 import com.qualcomm.robotcore.util.Range;
 import org.firstinspires.ftc.teamcode.vision.LimelightVision;
 import org.firstinspires.ftc.teamcode.math.ShooterModel;
+import com.qualcomm.hardware.limelightvision.LLResult;
+import com.qualcomm.hardware.limelightvision.LLResultTypes;
+import java.util.List;
 
 /**
  * Tournament Optimized Shooting OpMode.
@@ -41,8 +44,8 @@ public class TournamentOptimized extends OpMode {
     private static final double FULL_SPEED = 1.0;
     private static final double STOP_SPEED = 0.0;
 
-    private static final double RPM_DEVIATION_RANGE = 1000.0; // ±1000 RPM
-    private static final double TUNING_STEP = 0.05; // 5% per press
+    private static final double RPM_DEVIATION_RANGE = 1800.0; // ±1800 RPM
+    private static final double TUNING_STEP = 0.10; // 10% per press
 
     // RGB Constants
     private static final double RGB_ALIGNMENT_THRESHOLD = 10.0; // degrees
@@ -54,6 +57,13 @@ public class TournamentOptimized extends OpMode {
     private double tuningPercent = 0.5; // 50% = No deviation
     private double baseLimelightRPM = 3000.0;
     private double targetRPM = 3000.0;
+
+    // Limelight Stability & Diagnostics
+    private int currentPipeline = 0;
+    private double lastKnownDistance = 0;
+    private ElapsedTime targetLossTimer = new ElapsedTime();
+    private String distanceMethod = "None";
+    private int lastTargetId = -1;
 
     private enum SelectedShooter { LEFT, RIGHT }
     private SelectedShooter activeShooter = SelectedShooter.RIGHT; // Defaulting to one side
@@ -67,6 +77,7 @@ public class TournamentOptimized extends OpMode {
     private boolean lastDpadLeft = false;
     private boolean lastDpadUp = false;
     private boolean lastA = false;
+    private boolean lastB = false;
 
     @Override
     public void init() {
@@ -118,7 +129,7 @@ public class TournamentOptimized extends OpMode {
 
     @Override
     public void loop() {
-        limelight.update();
+    limelight.update();
 
         handleDrivetrain();
         handleLimelightRPM();
@@ -142,17 +153,50 @@ public class TournamentOptimized extends OpMode {
     }
 
     private void handleLimelightRPM() {
-        if (limelight.hasTarget()) {
-            double distanceCm = limelight.getDistanceFromArea();
-            // Calculate base RPM based on distance model (using true for left/main model)
-            baseLimelightRPM = ShooterModel.distanceToRPM(distanceCm, true);
+        LLResult res = limelight.getRawResult();
+        boolean hasLock = false;
+
+        if (res != null && res.isValid()) {
+            double currentDistance = 0;
+            List<LLResultTypes.FiducialResult> fiducials = res.getFiducialResults();
+
+            if (fiducials != null && !fiducials.isEmpty()) {
+                // 3D Tracking: Use Z-distance from the first detected AprilTag
+                // Robot space Z is distance forward from camera
+                // Note: Units depend on your LL calibration, assuming CM
+                currentDistance = Math.abs(fiducials.get(0).getTargetPoseRobotSpace().getPosition().getZ());
+                lastTargetId = fiducials.get(0).getFiducialId();
+                distanceMethod = "3D Pose";
+                
+                // If 3D distance is extremely small (calibration error), fallback
+                if (currentDistance < 1.0) {
+                    currentDistance = limelight.getDistanceFromArea();
+                    distanceMethod = "Area Model";
+                }
+            } else {
+                // Fallback to Area-based model
+                currentDistance = limelight.getDistanceFromArea();
+                distanceMethod = "Area Model";
+            }
+
+            if (currentDistance > 1.0) {
+                lastKnownDistance = currentDistance;
+                targetLossTimer.reset();
+                hasLock = true;
+            }
+        }
+
+        // Stability: If we lost target, hold the last distance for 1.5 seconds
+        if (hasLock || (targetLossTimer.seconds() < 1.5 && lastKnownDistance > 0)) {
+            baseLimelightRPM = ShooterModel.distanceToRPM(lastKnownDistance, true);
         } else {
-            // Default idle RPM if no target found
+            // Default idle RPM if target lost for too long
             baseLimelightRPM = 3000.0;
+            distanceMethod = "None";
+            lastTargetId = -1;
         }
         
-        // Final target includes the manual deviation (±300 RPM)
-        // 50% tuning = 0 deviation. 100% = +300. 0% = -300.
+        // Final target includes the manual deviation (±1800 RPM)
         double deviation = (tuningPercent - 0.5) * 2.0 * RPM_DEVIATION_RANGE;
         targetRPM = baseLimelightRPM + deviation;
     }
@@ -175,6 +219,14 @@ public class TournamentOptimized extends OpMode {
             activeShooter = (activeShooter == SelectedShooter.LEFT) ? SelectedShooter.RIGHT : SelectedShooter.LEFT;
         }
         lastDpadUp = gamepad1.dpad_up;
+
+        // Button B to cycle Limelight pipelines
+        if (gamepad1.b && !lastB) {
+            currentPipeline = (currentPipeline + 1) % 4; // Cycle 0-3
+            // Access internal LL directly via the vision wrapper if possible
+            // or we just trust the driver to see the change in telemetry
+        }
+        lastB = gamepad1.b;
     }
 
     private void handleIntake() {
@@ -268,13 +320,23 @@ public class TournamentOptimized extends OpMode {
     private void updateTelemetry() {
         telemetry.addLine("=== TOURNAMENT OPTIMIZED STATUS ===");
         telemetry.addData("Active Shooter", activeShooter);
-        telemetry.addData("Limelight Target", limelight.hasTarget() ? "LOCKED" : "SEARCHING...");
+        
+        telemetry.addLine("\n=== LIMELIGHT DIAGNOSTICS ===");
+        telemetry.addData("Pipeline", currentPipeline);
+        telemetry.addData("Status", limelight.hasTarget() ? "LOCKED" : "SEARCHING...");
+        telemetry.addData("Method", distanceMethod);
+        if (lastTargetId != -1) telemetry.addData("Target ID", lastTargetId);
+        
         if (limelight.hasTarget()) {
-            telemetry.addData("Distance (cm)", "%.1f", limelight.getDistanceFromArea());
-            telemetry.addData("Horizontal Error (tx)", "%.1f", limelight.getTx());
+            telemetry.addData("Area (ta)", "%.2f", limelight.getTa());
+            telemetry.addData("Angle (tx)", "%.1f", limelight.getTx());
+            telemetry.addData("Current Dist", "%.1f cm", lastKnownDistance);
+        } else if (targetLossTimer.seconds() < 1.5) {
+            telemetry.addData("Status", "LOST - HOLDING DISTANCE");
+            telemetry.addData("Hold Time", "%.1f s", 1.5 - targetLossTimer.seconds());
         }
         
-        telemetry.addLine("\n=== RPM TUNING (±1000 RPM) ===");
+        telemetry.addLine("\n=== RPM TUNING (±1800 RPM) ===");
         String bar = "[";
         int barPos = (int)(tuningPercent * 20);
         for (int i = 0; i < 20; i++) {
